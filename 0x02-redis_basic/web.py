@@ -1,58 +1,60 @@
 #!/usr/bin/env python3
 """
-Web caching and tracking module using Redis.
+Web cache module: fetch pages, cache results with expiration,
+and track URL access counts using Redis.
 """
-import requests
+
 import redis
-from typing import Callable
+import requests
 from functools import wraps
+from typing import Callable
 
 
-def cache_page(method: Callable) -> Callable:
+redis_client = redis.Redis()
+
+
+def count_calls(method: Callable) -> Callable:
     """
-    Decorator to cache web page content and track access counts.
-
-    Args:
-        method (Callable): The method to be decorated.
-
-    Returns:
-        Callable: Wrapped function that caches content and tracks URL access.
+    Decorator to count how many times a URL is accessed.
+    The URL is expected as the first argument of the function.
     """
     @wraps(method)
-    def wrapper(url: str) -> str:
-        redis_client = redis.Redis(decode_responses=True)
-        count_key = f"count:{url}"
-        cache_key = f"cache:{url}"
-        
-        # Increment access count
-        redis_client.incr(count_key)
-        
-        # Check cache
-        cached_content = redis_client.get(cache_key)
-        if cached_content is not None:
-            return cached_content
-        
-        # Fetch and cache content
-        content = method(url)
-        redis_client.setex(cache_key, 10, content)
-        return content
+    def wrapper(url: str, *args, **kwargs):
+        redis_client.incr(f"count:{url}")
+        return method(url, *args, **kwargs)
     return wrapper
 
 
-@cache_page
+def cache_page(expiration: int = 10) -> Callable:
+    """
+    Decorator to cache the page content of a URL in Redis for a given expiration time.
+    The URL is expected as the first argument of the function.
+    """
+    def decorator(method: Callable) -> Callable:
+        @wraps(method)
+        def wrapper(url: str, *args, **kwargs):
+            cached = redis_client.get(f"cached:{url}")
+            if cached:
+                return cached.decode('utf-8')
+            result = method(url, *args, **kwargs)
+            redis_client.setex(f"cached:{url}", expiration, result)
+            return result
+        return wrapper
+    return decorator
+
+
+@count_calls
+@cache_page(expiration=10)
 def get_page(url: str) -> str:
     """
-    Fetch HTML content from a URL and cache it with a 10-second expiration.
+    Fetch HTML content of the given URL using requests.
 
     Args:
-        url (str): The URL to fetch content from.
+        url: URL to fetch.
 
     Returns:
-        str: The HTML content of the URL or an error message if the request fails.
+        The HTML content as a string.
     """
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        return response.text
-    except requests.RequestException as e:
-        return f"Error fetching {url}: {str(e)}"
+    response = requests.get(url)
+    response.raise_for_status()
+    return response.text
