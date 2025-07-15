@@ -6,6 +6,7 @@ Redis config file
 
 import redis
 import uuid
+from typing import Union, Optional, Callable
 
 
 class Cache:
@@ -36,3 +37,26 @@ class Cache:
         self._redis.set(uuid_value, data)
 
         return uuid_value
+        
+    def get(
+            self, key: str, fn: Optional[Callable] = None
+            ) -> Optional[Union[str, int, bytes]]:
+        """
+        Retrieve data from redis
+        """
+        data = self._redis.get(key)
+        if data is None:
+            return None
+        return fn(data) if fn else data
+
+    def get_str(self, key: str) -> str:
+        """
+        Retrieves string data from redis
+        """
+        return self.get(key, fn=lambda d: d.decode("utf-8"))
+
+    def get_int(self, key: str) -> str:
+        """
+        Retrieves int from redis
+        """
+        return self.get(key, fn=int)
